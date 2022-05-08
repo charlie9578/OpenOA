@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class Project_Kelmarsh(PlantData):
-    """This class loads data for the ENGIE La Haute Borne site into a PlantData
+    """This class loads data for the Cubico Kelmarsh site into a PlantData
     object"""
 
     def __init__(
@@ -75,18 +75,12 @@ class Project_Kelmarsh(PlantData):
         """
 
         # Extract data if necessary
-        ## self.extract_data()
+        self.extract_data()
 
         # Set time frequencies of data in minutes
-        self._meter_freq = "10T"  # Daily meter data
-        self._curtail_freq = "10T"  # Daily curtailment data
-        self._scada_freq = "10T"  # 10-min
-
-        # Load meta data
-        self._lat_lon = (52.40,-0.95)
-        self._plant_capacity = 6*2.05  # MW
-        self._num_turbines = 6
-        self._turbine_capacity = 2.05  # MW
+        self._meter_freq = "10T"  # 10-minute meter data
+        self._curtail_freq = "10T"  # 10-minute curtailment data
+        self._scada_freq = "10T"  # 10-min SCADA data
 
 
         ##############
@@ -120,6 +114,13 @@ class Project_Kelmarsh(PlantData):
             axis=1,
             inplace=True,
         )
+
+        
+        # Assign meta data
+        self._lat_lon = (self._asset.df["latitude"].mean(),self._asset.df["longitude"].mean())
+        self._plant_capacity = self._asset.df["rated_power_kw"].sum()/1000  # MW
+        self._num_turbines = self._asset.df["rated_power_kw"].count()
+        self._turbine_capacity = self._asset.df.iloc[0]["rated_power_kw"]/1000  # MW
 
 
         ###################
@@ -280,7 +281,9 @@ class Project_Kelmarsh(PlantData):
                               self._name,
                               "planetos",
                               lat=self._lat_lon[0],
-                              lon=self._lat_lon[1]
+                              lon=self._lat_lon[1],
+                              start_date="2000-01-01T00:00:00",
+                              end_date="2025-01-01T00:00:00",
                               )
 
         # merra2
