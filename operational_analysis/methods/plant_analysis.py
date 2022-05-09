@@ -18,6 +18,8 @@ from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import KFold
 
+from packaging import version
+
 from operational_analysis import logging, logged_method_call
 from operational_analysis.types import timeseries_table
 from operational_analysis.toolkits import filters
@@ -61,6 +63,7 @@ class MonteCarloAEP(object):
     The preprocessing should run in this order:
         1. Process revenue meter energy - creates monthly/daily data frame, gets revenue meter on monthly/daily basis, and adds
            data flag
+
         2. Process loss estimates - add monthly/daily curtailment and availabilty losses to monthly/daily data frame
 
         3. Process reanalysis data - add monthly/daily density-corrected wind speeds, temperature (if used) and wind direction (if used)
@@ -69,6 +72,7 @@ class MonteCarloAEP(object):
         4. Set up Monte Carlo - create the necessary Monte Carlo inputs to the OA process
 
         5. Run AEP Monte Carlo - run the OA process iteratively to get distribution of AEP results
+
     The end result is a distribution of AEP results which we use to assess expected AEP and associated uncertainty
     """
 
@@ -501,6 +505,60 @@ class MonteCarloAEP(object):
 
         plt.tight_layout()
         return plt
+
+
+    def table_style(self,styler):
+        """
+        Create a table style for nicer viewing
+        
+        Returns:
+            pandas.styler object
+        """
+
+        styler.set_caption("Monthly Analysis")
+        
+        # show percentages
+        styler.format('{:.2%}', subset=['energy_nan_perc',
+                                        'availability_pct', 
+                                        'curtailment_pct',
+                                        'avail_nan_perc',
+                                        'curt_nan_perc'])
+        
+        # add color to percentage backgrounds    
+        styler.background_gradient(subset = ['energy_nan_perc',
+                                            'availability_pct', 
+                                            'curtailment_pct',
+                                            'avail_nan_perc',
+                                            'curt_nan_perc'],
+                                axis=None, cmap="RdYlGn_r")
+        
+        # add color to energy_gwh backgrounds
+        styler.background_gradient(subset = ['energy_gwh'],
+                                axis=None, cmap="RdYlGn")
+                                
+        styler.background_gradient(subset = ['availability_gwh',
+                                            'curtailment_gwh',
+                                            'gross_energy_gwh'],
+                                axis=None, cmap="RdYlGn_r")
+        
+
+        # add color to resource backgrounds
+        styler.background_gradient(subset = ['era5',
+                                            'merra2'],
+                                axis=None, cmap="RdYlGn")
+        
+        # flag booleans red or green (good or bad)
+        styler.applymap(lambda x: 'color: {}'.format('green') if x == True else 'color: {}'.format('red'),
+            subset = ['availability_typical','curtailment_typical','combined_loss_valid'])
+        styler.applymap(lambda x: 'color: {}'.format('red') if x == True else 'color: {}'.format('green'),
+            subset = ['nan_flag'])
+        
+        if version.parse(pd.__version__) > version.parse('1.4.0'):
+            styler.format_index('%y-%m') # need to check works
+            #styler.format_index(lambda v: v.strftime("%A"))
+        
+        return styler
+
 
     @logged_method_call
     def groupby_time_res(self, df):
