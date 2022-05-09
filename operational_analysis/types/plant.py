@@ -122,6 +122,12 @@ class PlantData(object):
         self._start_time = parse(start_time)
         self._stop_time = parse(stop_time)
 
+    def convert(self,o):
+        import numpy as np
+        if isinstance(o, np.int64): return int(o)  
+        if isinstance(o, np.int32): return int(o)
+        raise TypeError("Object unserialisable: ",print(o))
+
     def save(self, path=None):
         """Save out the project and all JSON serializeable attributes to a file path.
 
@@ -145,9 +151,9 @@ class PlantData(object):
                 meta_dict[ca] = str(ci)
             else:
                 meta_dict[ca] = ci
-
+        
         with io.open(os.path.join(path, "metadata.json"), "w", encoding="utf-8") as outfile:
-            outfile.write(str(json.dumps(meta_dict, ensure_ascii=False)))
+            outfile.write(str(json.dumps(meta_dict, ensure_ascii=False,default=self.convert)))
 
     def load(self, path=None):
         """Load this project and all associated data from a file path

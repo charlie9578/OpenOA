@@ -118,6 +118,10 @@ class PandasTimeseriesTable(AbstractTimeseriesTable):
     def save(self, path, name, format="csv"):
         """Write data to file
         """
+
+        if self.df is None:
+            self.df = pd.DataFrame()
+            
         logger.info("save name:{}".format(name))
         if format != "csv":
             raise NotImplementedError("Cannot save to format %s yet" % (format,))
