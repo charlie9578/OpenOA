@@ -254,6 +254,8 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
     scada_files = Path(path).rglob("Turbine_Data*.csv")
     scada_headers = get_scada_headers(scada_files)
     scada_df = get_scada_df(scada_headers)
+    scada_df["Yaw error"] = scada_df["Nacelle position (°)"] - scada_df["Wind direction (°)"]
+    # scada_df["Blade angle (pitch position) A (°)"] = (scada_df["Blade angle (pitch position) A (°)"]+180)%360-180 # wrap high pitch angles round to zero
     scada_df = scada_df.reset_index()
 
     ##############
@@ -400,6 +402,8 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
         "scada": {
             "WMET_EnvTmp": "Nacelle ambient temperature (°C)",
             "WMET_HorWdDir": "Wind direction (°)",
+            "WNAC_Dir": "Nacelle position (°)",
+            "WMET_HorWdDirRel": "Yaw error",  # wind direction relative to nacelle orientation, degrees
             "WMET_HorWdSpd": "Wind speed (m/s)",
             "WROT_BlPthAngVal": "Blade angle (pitch position) A (°)",
             "asset_id": "Turbine",
