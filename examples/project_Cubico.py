@@ -253,7 +253,20 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
     logger.info("Reading in the SCADA data")
     scada_files = Path(path).rglob("Turbine_Data*.csv")
     scada_headers = get_scada_headers(scada_files)
-    scada_df = get_scada_df(scada_headers)
+    use_columns = [
+        "# Date and time",
+        "Power (kW)",
+        "Wind speed (m/s)",
+        "Wind direction (°)",
+        "Nacelle position (°)",
+        "Nacelle ambient temperature (°C)",
+        "Blade angle (pitch position) A (°)",
+        "Blade angle (pitch position) A, Min (°)",
+        "Blade angle (pitch position) A, Max (°)",
+        "Power, Minimum (kW)",
+        "Power, Maximum (kW)",
+    ]
+    scada_df = get_scada_df(scada_headers, use_columns=use_columns)
     scada_df["Yaw error"] = scada_df["Nacelle position (°)"] - scada_df["Wind direction (°)"]
     # scada_df["Blade angle (pitch position) A (°)"] = (scada_df["Blade angle (pitch position) A (°)"]+180)%360-180 # wrap high pitch angles round to zero
     scada_df = scada_df.reset_index()
@@ -406,8 +419,12 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
             "WMET_HorWdDirRel": "Yaw error",  # wind direction relative to nacelle orientation, degrees
             "WMET_HorWdSpd": "Wind speed (m/s)",
             "WROT_BlPthAngVal": "Blade angle (pitch position) A (°)",
+            "WROT_BlPthAngVal_MIN": r"Blade angle (pitch position) A, Min (°)",
+            "WROT_BlPthAngVal_MAX": r"Blade angle (pitch position) A, Max (°)",
             "asset_id": "Turbine",
             "WTUR_W": "Power (kW)",
+            "WTUR_W_MIN": "Power, Minimum (kW)",
+            "WTUR_W_MAX": "Power, Maximum (kW)",
             "frequency": "10min",
             "time": "Timestamp",
         },
@@ -418,6 +435,15 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
 
     with open(f"{path}/plant_meta.yml", "w") as outfile:
         yaml.dump(asset_json, outfile, default_flow_style=False)
+
+    mappings = yaml.safe_load(Path("data/kelmarsh/plant_meta.yml").read_text())
+    scada_df = scada_df.rename(columns={v: k for k, v in mappings["scada"].items()})
+    meter_df = meter_df.rename(columns={v: k for k, v in mappings["meter"].items()})
+    curtail_df = curtail_df.rename(columns={v: k for k, v in mappings["curtail"].items()})
+    asset_df = asset_df.rename(columns={v: k for k, v in mappings["asset"].items()})
+    mappings_remaining = {
+        key: mappings[key] for key in ["reanalysis", "latitude", "longitude", "capacity"]
+    }
 
     # Return the appropriate data format
     if return_value == "dataframes":
@@ -432,7 +458,7 @@ def prepare(asset: str = "kelmarsh", return_value: str = "plantdata") -> PlantDa
         # Build and return PlantData
         plantdata = PlantData(
             analysis_type="MonteCarloAEP",  # Choosing a random type that doesn't fail validation
-            metadata=f"{path}/plant_meta.yml",
+            metadata=mappings_remaining,
             scada=scada_df,
             meter=meter_df,
             curtail=curtail_df,
