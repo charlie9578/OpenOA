@@ -1235,27 +1235,31 @@ class PlantData:
             pd.DataFrame: Dataframe containing distances between each pair of assets
         """
         ix = self.asset.index.values
-        distance = (
-            pd.DataFrame(
-                [i, j, self.asset.loc[i, "geometry"].distance(self.asset.loc[j, "geometry"])]
-                for i, j in itertools.combinations(ix, 2)
+
+        if len(ix) > 1:
+            distance = (
+                pd.DataFrame(
+                    [i, j, self.asset.loc[i, "geometry"].distance(self.asset.loc[j, "geometry"])]
+                    for i, j in itertools.combinations(ix, 2)
+                )
+                .pivot(index=0, columns=1, values=2)
+                .rename_axis(index={0: None}, columns={1: None})
+                .fillna(0)
+                .loc[ix[:-1], ix[1:]]
             )
-            .pivot(index=0, columns=1, values=2)
-            .rename_axis(index={0: None}, columns={1: None})
-            .fillna(0)
-            .loc[ix[:-1], ix[1:]]
-        )
 
-        # Insert the first column and last row because the self-self combinations are not produced in the above
-        distance.insert(0, ix[0], 0.0)
-        distance.loc[ix[-1]] = 0
+            # Insert the first column and last row because the self-self combinations are not produced in the above
+            distance.insert(0, ix[0], 0.0)
+            distance.loc[ix[-1]] = 0
 
-        # Maintain v2 compatibility of np.inf for the diagonal
-        distance = distance + distance.values.T - np.diag(np.diag(distance.values))
-        distance_array = distance.values
-        np.fill_diagonal(distance_array, np.inf)
-        distance.loc[:, :] = distance_array
-        self.asset_distance_matrix = distance
+            # Maintain v2 compatibility of np.inf for the diagonal
+            distance = distance + distance.values.T - np.diag(np.diag(distance.values))
+            distance_array = distance.values
+            np.fill_diagonal(distance_array, np.inf)
+            distance.loc[:, :] = distance_array
+            self.asset_distance_matrix = distance
+        else:
+            self.asset_distance_matrix = np.inf
 
     def turbine_distance_matrix(self, turbine_id: str = None) -> pd.DataFrame:
         """Returns the distances between all turbines in the plant with `np.inf` for the distance
@@ -1301,41 +1305,46 @@ class PlantData:
                 from the asset given by the row index to the asset given by the column index, relative to north)
         """
         ix = self.asset.index.values
-        direction = (
-            pd.DataFrame(
-                [
-                    i,
-                    j,
-                    np.degrees(
-                        np.arctan2(
-                            self.asset.loc[j, "geometry"].x - self.asset.loc[i, "geometry"].x,
-                            self.asset.loc[j, "geometry"].y - self.asset.loc[i, "geometry"].y,
+
+        if len(ix) > 1:
+            direction = (
+                pd.DataFrame(
+                    [
+                        i,
+                        j,
+                        np.degrees(
+                            np.arctan2(
+                                self.asset.loc[j, "geometry"].x - self.asset.loc[i, "geometry"].x,
+                                self.asset.loc[j, "geometry"].y - self.asset.loc[i, "geometry"].y,
+                            )
                         )
-                    )
-                    % 360.0,
-                ]
-                for i, j in itertools.combinations(ix, 2)
+                        % 360.0,
+                    ]
+                    for i, j in itertools.combinations(ix, 2)
+                )
+                .pivot(index=0, columns=1, values=2)
+                .rename_axis(index={0: None}, columns={1: None})
+                .fillna(0)
+                .loc[ix[:-1], ix[1:]]
             )
-            .pivot(index=0, columns=1, values=2)
-            .rename_axis(index={0: None}, columns={1: None})
-            .fillna(0)
-            .loc[ix[:-1], ix[1:]]
-        )
 
-        # Insert the first column and last row because the self-self combinations are not produced in the above
-        direction.insert(0, ix[0], 0.0)
-        direction.loc[ix[-1]] = 0
+            # Insert the first column and last row because the self-self combinations are not produced in the above
+            direction.insert(0, ix[0], 0.0)
+            direction.loc[ix[-1]] = 0
 
-        # Maintain v2 compatibility of np.inf for the diagonal
-        direction = (
-            direction
-            + np.triu((direction.values - 180.0) % 360.0, 1).T
-            - np.diag(np.diag(direction.values))
-        )
-        direction_array = direction.values
-        np.fill_diagonal(direction_array, np.inf)
-        direction.loc[:, :] = direction_array
-        self.asset_direction_matrix = direction
+            # Maintain v2 compatibility of np.inf for the diagonal
+            direction = (
+                direction
+                + np.triu((direction.values - 180.0) % 360.0, 1).T
+                - np.diag(np.diag(direction.values))
+            )
+            direction_array = direction.values
+            np.fill_diagonal(direction_array, np.inf)
+            direction.loc[:, :] = direction_array
+            self.asset_direction_matrix = direction
+
+        else:
+            self.asset_direction_matrix = np.inf
 
     def turbine_direction_matrix(self, turbine_id: str = None) -> pd.DataFrame:
         """Returns the directions between all turbines in the plant with `np.inf` for the direction

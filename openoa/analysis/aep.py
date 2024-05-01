@@ -113,6 +113,8 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
             general additive, "gbm" for gradient boosting, or "etr" for extra treees). At monthly
             time resolution only linear regression is allowed because of the reduced number of data
             points. Defaults to "lin".
+
+
         ml_setup_kwargs(:obj:`kwargs`): Keyword arguments to
             :py:class:`openoa.utils.machine_learning_setup.MachineLearningSetup` class. Defaults to {}.
     """
@@ -168,6 +170,8 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
     reg_model: str = field(
         default="lin", converter=str, validator=attrs.validators.in_(("lin", "gbm", "etr", "gam"))
     )
+    operational_months_min: int = field(default=6, converter=float)
+    operational_months_max: int = field(default=36, converter=float)
     ml_setup_kwargs: dict = field(default={}, converter=dict)
 
     # Internally created attributes need to be given a type before usage
@@ -283,6 +287,8 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
         uncertainty_outlier: float | tuple[float, float] = None,
         uncertainty_nan_energy: float = None,
         time_resolution: str = None,
+        operational_months_min: int = None,
+        operational_months_max: int = None,
         end_date_lt: str | pd.Timestamp | None = None,
         ml_setup_kwargs: dict = None,
     ) -> None:
@@ -314,6 +320,8 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
                 to 0.01.
             time_resolution(:obj:`string`): whether to perform the AEP calculation at monthly ("ME" or
                 "MS"), daily ("D") or hourly ("h") time resolution. Defaults to "ME".
+            operational_months_min
+            operational_months_max
             end_date_lt(:obj:`string` or :obj:`pandas.Timestamp`): The last date to use for the
                 long-term correction. Note that only the component of the date corresponding to the
                 time_resolution argument is considered. If None, the end of the last complete month of
@@ -360,6 +368,12 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
         if time_resolution is not None:
             initial_parameters["time_resolution"] = self.time_resolution
             self.time_resolution = time_resolution
+        if operational_months_min is not None:
+            initial_parameters["operational_months_min"] = self.operational_months_min
+            self.operational_months_min = operational_months_min
+        if operational_months_max is not None:
+            initial_parameters["operational_months_max"] = self.operational_months_max
+            self.operational_months_max = operational_months_max
         if end_date_lt is not None:
             initial_parameters["end_date_lt"] = self.end_date_lt
             self.end_date_lt = end_date_lt
@@ -691,6 +705,12 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
         # Create extra long list of renanalysis product names to sample from
         reanal_list = list(np.repeat(self.reanalysis_products, self.num_sim))
 
+        self.operational_months_max = min(
+            12 * (self.aggregate.index[-1].year - self.aggregate.index[0].year)
+            + (self.aggregate.index[-1].month - self.aggregate.index[0].month),
+            self.operational_months_max,
+        )
+
         inputs = {
             "reanalysis_product": np.asarray(random.sample(reanal_list, self.num_sim)),
             "metered_energy_fraction": np.random.normal(1, self.uncertainty_meter, self.num_sim),
@@ -702,6 +722,9 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
                 self.uncertainty_loss_max[0], self.uncertainty_loss_max[1] + 1, self.num_sim
             )
             / 100.0,
+            "operational_months": np.random.randint(
+                self.operational_months_min, self.operational_months_max + 1, self.num_sim
+            ),
         }
         if self.outlier_detection:
             inputs["outlier_threshold"] = (
@@ -763,14 +786,15 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
                 )
             )
         # Apply window range filter
-        df_sub.loc[:, "flag_window"] = filters.window_range_flag(
-            window_col=df_sub[reanal],
-            window_start=5.0,
-            window_end=40,
-            value_col=df_sub["energy_gwh"],
-            value_min=0.02 * plant_capac,
-            value_max=1.2 * plant_capac,
-        )
+        df_sub.loc[:, "flag_window"] = False
+        # df_sub.loc[:, "flag_window"] = filters.window_range_flag(
+        #     window_col=df_sub[reanal],
+        #     window_start=5.0,
+        #     window_end=40,
+        #     value_col=df_sub["energy_gwh"],
+        #     value_min=0.02 * plant_capac,
+        #     value_max=1.2 * plant_capac,
+        # )
 
         if self.outlier_detection:
             if self.time_resolution in ("MS", "ME"):
@@ -863,6 +887,14 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
         # Get data to use in regression based on filtering result
         reg_data = self.filter_outliers(n)
 
+        operational_end_date = self.aggregate.index[0] + pd.DateOffset(
+            months=self._run.operational_months
+        )
+
+        reg_data = reg_data.loc[:operational_end_date]
+
+        # print(f"{reg_data.iloc[0].name}  {reg_data.iloc[-1].name}")
+
         # Now monte carlo sample the data
         # Create new Monte-Carlo sampled data frame and sample energy data, calculate MC-generated
         # availability and curtailment
@@ -870,7 +902,9 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
         mc_availability = reg_data["availability_gwh"] * self._run.loss_fraction
         mc_curtailment = reg_data["curtailment_gwh"] * self._run.loss_fraction
 
-        # Calculate gorss energy and normalize to 30-days
+        # print(mc_energy)
+
+        # Calculate gross energy and normalize to 30-days
         mc_gross_energy = mc_energy + mc_availability + mc_curtailment
         if self.time_resolution in ("MS", "ME"):
             num_days_expected = reg_data["num_days_expected"]
@@ -879,6 +913,7 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
             mc_gross_norm = mc_gross_energy
 
         # Set reanalysis product for MC inputs
+        # print(reg_data)
         reg_inputs = reg_data[self._run.reanalysis_product]
 
         if self.reg_temperature:  # if temperature is considered as regression variable
@@ -891,6 +926,9 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
             reg_inputs = pd.concat([reg_inputs, np.cos(np.deg2rad(mc_wind_direction))], axis=1)
 
         reg_inputs = pd.concat([reg_inputs, mc_gross_norm], axis=1)
+
+        # print(reg_inputs)
+
         # Return values needed for regression
         return reg_inputs  # Return randomly sampled wind speed, wind direction, temperature and normalized gross energy
 
@@ -1029,7 +1067,7 @@ class MonteCarloAEP(FromDictMixin, ResetValuesMixin):
                 ]
             gross_por = fitted_model.predict(np.array(pd.concat(reg_inputs_por, axis=1)))
 
-            # Create padans dataframe for gross_por and group by calendar date to have a single full year
+            # Create pandas dataframe for gross_por and group by calendar date to have a single full year
             gross_por = self.groupby_time_res(
                 pd.DataFrame(
                     data=gross_por, index=self.reanalysis_por[self._run.reanalysis_product].index
@@ -1534,6 +1572,8 @@ __defaults_reg_model = MonteCarloAEP.__attrs_attrs__.reg_model.default
 __defaults_ml_setup_kwargs = MonteCarloAEP.__attrs_attrs__.ml_setup_kwargs.default
 __defaults_reg_temperature = MonteCarloAEP.__attrs_attrs__.reg_temperature.default
 __defaults_reg_wind_direction = MonteCarloAEP.__attrs_attrs__.reg_wind_direction.default
+__defaults_operational_months_min = MonteCarloAEP.__attrs_attrs__.operational_months_min.default
+__defaults_operational_months_max = MonteCarloAEP.__attrs_attrs__.operational_months_max.default
 
 
 def create_MonteCarloAEP(
@@ -1552,6 +1592,8 @@ def create_MonteCarloAEP(
     ml_setup_kwargs: dict = __defaults_ml_setup_kwargs,
     reg_temperature: bool = __defaults_reg_temperature,
     reg_wind_direction: bool = __defaults_reg_wind_direction,
+    operational_months_min: int = __defaults_operational_months_min,
+    operational_months_max: int = __defaults_operational_months_max,
 ) -> MonteCarloAEP:
     return MonteCarloAEP(
         plant=project,
@@ -1569,6 +1611,8 @@ def create_MonteCarloAEP(
         ml_setup_kwargs=ml_setup_kwargs,
         reg_temperature=reg_temperature,
         reg_wind_direction=reg_wind_direction,
+        operational_months_min=operational_months_min,
+        operational_months_max=operational_months_max,
     )
 
 

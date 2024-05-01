@@ -970,7 +970,7 @@ class ReanalysisMetaData(FromDictMixin):  # noqa: F821
 
 @define(auto_attribs=True)
 class PlantMetaData(FromDictMixin):  # noqa: F821
-    """Composese the metadata/validation requirements from each of the individual data
+    """Composes the metadata/validation requirements from each of the individual data
     types that can compose a `PlantData` object.
 
     Args:
