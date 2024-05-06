@@ -30,6 +30,10 @@ import pandas as pd
 import xarray as xr
 import requests
 from tqdm import tqdm
+from pyproj import Transformer
+from bokeh.models import WMTSTileSource, ColumnDataSource
+from bokeh.palettes import Category10, viridis
+from bokeh.plotting import figure
 
 import openoa.utils.downloader as downloader
 from openoa.plant import PlantData
@@ -49,6 +53,9 @@ def get_Elexon_plant_information():
     plant_locations = pd.read_csv(
         f"{base_url}/attribute_sources/plant-locations/plant-locations.csv"
     )
+    # plant_capacities = pd.read_csv(
+    #     f"{base_url}/attribute_sources/renewable-energy-planning-database/renewable-energy-planning-database-q2-june-2021.csv"
+    # )
     fuel_types = pd.read_csv(f"{base_url}/attribute_sources/bmu-fuel-types/fuel_types.csv")
 
     power_station_ids["ngc_bmu_id"] = power_station_ids["ngc_bmu_id"].str.split(",")
@@ -99,6 +106,27 @@ def get_Elexon_plant_generation(
         df = pd.DataFrame(pd.concat(dfs).groupby("datetime")["quantity"].sum())
     else:
         df = None
+
+    return df
+
+
+def get_Elexon_plant_capacity(
+    publishDateTimeFrom="2000-01-01T00:00:00Z",
+    publishDateTimeTo="2024-03-01T00:00:00Z",
+):
+    """
+    Build and make a request for Elexon plant generation
+
+    API documentation: https://developer.data.elexon.co.uk/
+
+    Licence: https://www.elexon.co.uk/data/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/
+    """
+
+    url = f"https://data.elexon.co.uk/bmrs/api/v1/datasets/IGCPU/stream?publishDateTimeFrom={publishDateTimeFrom}&publishDateTimeTo={publishDateTimeTo}"
+
+    result = requests.get(url)
+
+    df = pd.DataFrame.from_records(result.json())
 
     return df
 
@@ -745,6 +773,107 @@ def get_merra2_monthly(
     df.to_csv(save_pathname / f"{save_filename}.csv", index=True)
 
     return df
+
+
+def plot_windfarm(
+    asset_df,
+    tile_name="OpenMap",
+    plot_width=800,
+    plot_height=800,
+    marker_size=14,
+    figure_kwargs={},
+    marker_kwargs={},
+):
+    """Plot the windfarm spatially on a map using the Bokeh plotting libaray.
+
+    Args:
+        asset_df(:obj:`pd.DataFrame`): PlantData.asset object containing the asset metadata.
+        tile_name(:obj:`str`): tile set to be used for the underlay, e.g. OpenMap, ESRI, OpenTopoMap
+        plot_width(:obj:`int`): width of plot
+        plot_height(:obj:`int`): height of plot
+        marker_size(:obj:`int`): size of markers
+        figure_kwargs(:obj:`dict`): additional figure options for advanced users, see Bokeh docs
+        marker_kwargs(:obj:`dict`): additional marker options for advanced users, see Bokeh docs.
+            We have some custom behavior around the "fill_color" attribute. If "fill_color" is not
+            defined, OpenOA will use an internally defined color pallete. If "fill_color" is the
+            name of a column in the asset table, OpenOA will use the value of that column as the
+            marker color. Otherwise, "fill_color" is passed through to Bokeh.
+
+    Returns:
+        Bokeh_plot(:obj:`axes handle`): windfarm map
+
+    Example:
+        .. bokeh-plot::
+
+            import pandas as pd
+            from bokeh.plotting import figure, output_file, show
+
+            from openoa.utils.plot import plot_windfarm
+
+            from examples import project_ENGIE
+
+            # Load plant object
+            project = project_ENGIE.prepare("../examples/data/la_haute_borne")
+
+            # Create the bokeh wind farm plot
+            show(plot_windfarm(project.asset, tile_name="ESRI", plot_width=600, plot_height=600))
+    """
+
+    # See https://wiki.openstreetmap.org/wiki/Tile_servers for various tile services
+    MAP_TILES = {
+        "OpenMap": WMTSTileSource(url="http://c.tile.openstreetmap.org/{Z}/{X}/{Y}.png"),
+        "ESRI": WMTSTileSource(
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{Z}/{Y}/{X}.jpg"
+        ),
+        "OpenTopoMap": WMTSTileSource(url="https://tile.opentopomap.org/{Z}/{X}/{Y}.png"),
+    }
+
+    # Use pyproj to transform longitude and latitude into web-mercator and add to a copy of the asset dataframe
+    TRANSFORM_4326_TO_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857")
+
+    asset_df["x"], asset_df["y"] = TRANSFORM_4326_TO_3857.transform(
+        asset_df["latitude"], asset_df["longitude"]
+    )
+    asset_df["coordinates"] = tuple(zip(asset_df["latitude"], asset_df["longitude"]))
+
+    # Define default and then update figure and marker options based on kwargs
+    figure_options = {
+        "tools": "save,hover,pan,wheel_zoom,reset,help",
+        "x_axis_label": "Longitude",
+        "y_axis_label": "Latitude",
+        "match_aspect": True,
+        "tooltips": [("asset", "@name"), ("type", "@type"), ("(Lat,Lon)", "@coordinates")],
+    }
+    figure_options.update(figure_kwargs)
+
+    marker_options = {
+        "marker": "circle_y",
+        "line_width": 1,
+        "alpha": 0.8,
+        "fill_color": "cyan",
+        "line_color": "black",
+        "legend_group": "type",
+    }
+    marker_options.update(marker_kwargs)
+
+    # Create the bokeh data source without the "geometry" that isn't compatible with bokeh
+    source = ColumnDataSource(asset_df)
+
+    # Create a bokeh figure with tiles
+    plot_map = figure(
+        width=plot_width,
+        height=plot_height,
+        x_axis_type="mercator",
+        y_axis_type="mercator",
+        **figure_options,
+    )
+
+    plot_map.add_tile(MAP_TILES[tile_name])
+
+    # Plot the asset devices
+    plot_map.scatter(x="x", y="y", source=source, size=marker_size, **marker_options)
+
+    return plot_map
 
 
 def prepare(
