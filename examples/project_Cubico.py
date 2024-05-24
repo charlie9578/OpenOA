@@ -71,9 +71,9 @@ def download_asset_data(
     """
 
     if asset.lower() == "kelmarsh":
-        record_id = 7212475
+        record_id = 8252025
     elif asset.lower() == "penmanshiel":
-        record_id = 5946808
+        record_id = 8253010
     else:
         raise NameError("Zenodo record id undefined for: " + asset)
 
