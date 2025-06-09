@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file. If you make
 
 ## Unreleased
 
+- Deprecate Python 3.8 support and enable 3.12 support.
 - Features and updates:
   - `MonteCarloAEP` updates
     - Add an `n_jobs` input to the Monte Carlo AEP method to allow for the underlying models to be
